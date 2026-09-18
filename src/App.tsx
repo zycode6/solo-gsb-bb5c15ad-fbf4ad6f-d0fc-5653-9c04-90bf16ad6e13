@@ -15,6 +15,9 @@ import DriftPanel, { EMPTY_DRIFT_FORM } from './components/DriftPanel';
 import type { DriftForm } from './components/DriftPanel';
 import SilencePanel, { DEFAULT_SILENCE_FORM } from './components/SilencePanel';
 import type { SilenceForm } from './components/SilencePanel';
+import ReflowPanel, { DEFAULT_REFLOW_FORM, computeReflowPlan } from './components/ReflowPanel';
+import type { ReflowForm } from './components/ReflowPanel';
+import { applyReflow } from './reflow';
 import { applySilenceSnap, planSilenceSnap, resolveRange, parseSilenceParams } from './silence';
 import './styles.css';
 
@@ -42,10 +45,13 @@ export default function App() {
   const [showMerge, setShowMerge] = useState(false);
   const [showDrift, setShowDrift] = useState(false);
   const [showSilence, setShowSilence] = useState(false);
+  const [showReflow, setShowReflow] = useState(false);
   // 漂移校准表单（锚点选择 + 目标时间输入），面板关闭后保留，重新导入字幕时重置
   const [driftForm, setDriftForm] = useState<DriftForm>(EMPTY_DRIFT_FORM);
   // 静音吸附表单（连续区间 + 阈值等参数），面板关闭后保留，重新导入字幕时重置
   const [silenceForm, setSilenceForm] = useState<SilenceForm>(DEFAULT_SILENCE_FORM);
+  // 断行重排表单（连续区间 + 每行最大字素数），面板关闭后保留，重新导入字幕时重置
+  const [reflowForm, setReflowForm] = useState<ReflowForm>(DEFAULT_REFLOW_FORM);
   // 修订稿独立于当前字幕保存：导入不会替换当前时间轴
   const [revision, setRevision] = useState<Subtitle[]>([]);
   const [revisionName, setRevisionName] = useState('');
@@ -117,6 +123,7 @@ export default function App() {
     setRevisionName('');
     setDriftForm(EMPTY_DRIFT_FORM);
     setSilenceForm(DEFAULT_SILENCE_FORM);
+    setReflowForm(DEFAULT_REFLOW_FORM);
   }, []);
 
   const importSrt = useCallback(
@@ -190,6 +197,25 @@ export default function App() {
       };
     });
   }, [silenceForm, waveform]);
+
+  // 应用断行重排：仅把勾选且可行（文本确有变化）的条目写回，其余字幕
+  // （含无可行方案的条目）原样保留，整批作为一次撤销/重做操作
+  const applyReflowSelection = useCallback(
+    (checkedIds: Set<string>) => {
+      setHistory((h) => {
+        // 应用时基于 history.present 即时重算，与面板预览使用同一套规则
+        const plan = computeReflowPlan(h.present, reflowForm);
+        if (!plan) return h;
+        const writeCount = plan.items.filter(
+          (it) => it.ok && !it.unchanged && checkedIds.has(it.id)
+        ).length;
+        if (writeCount === 0) return h;
+        const next = applyReflow(h.present, plan, checkedIds);
+        return { past: [...h.past, h.present], present: next, future: [] };
+      });
+    },
+    [reflowForm]
+  );
 
   const importVideo = useCallback(    (file: File) => {
       setVideoUrl((old) => {
@@ -285,6 +311,7 @@ export default function App() {
         showMerge={showMerge}
         showDrift={showDrift}
         showSilence={showSilence}
+        showReflow={showReflow}
         canSilence={waveformReady}
         onImportSrt={importSrt}
         onImportVideo={importVideo}
@@ -301,18 +328,27 @@ export default function App() {
           setShowMerge((v) => !v);
           setShowDrift(false);
           setShowSilence(false);
+          setShowReflow(false);
         }}
         onToggleDrift={() => {
           setShowDrift((v) => !v);
           setShowMerge(false);
           setShowSilence(false);
+          setShowReflow(false);
         }}
         onToggleSilence={() => {
-          // 三个侧栏互斥；未就绪时按钮禁用，这里再兜底一次
+          // 侧栏互斥；未就绪时按钮禁用，这里再兜底一次
           if (!waveformReady) return;
           setShowSilence((v) => !v);
           setShowMerge(false);
           setShowDrift(false);
+          setShowReflow(false);
+        }}
+        onToggleReflow={() => {
+          setShowReflow((v) => !v);
+          setShowMerge(false);
+          setShowDrift(false);
+          setShowSilence(false);
         }}
       />
 
@@ -357,6 +393,16 @@ export default function App() {
               selectedId={selectedId}
               onJump={jumpTo}
               onApply={applySilence}
+            />
+          )}
+          {showReflow && (
+            <ReflowPanel
+              subs={subs}
+              form={reflowForm}
+              onFormChange={setReflowForm}
+              selectedId={selectedId}
+              onJump={jumpTo}
+              onApply={applyReflowSelection}
             />
           )}
         </section>
