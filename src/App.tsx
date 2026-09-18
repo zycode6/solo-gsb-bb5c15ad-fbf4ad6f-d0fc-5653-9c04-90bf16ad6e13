@@ -15,7 +15,10 @@ import DriftPanel, { EMPTY_DRIFT_FORM } from './components/DriftPanel';
 import type { DriftForm } from './components/DriftPanel';
 import SilencePanel, { DEFAULT_SILENCE_FORM } from './components/SilencePanel';
 import type { SilenceForm } from './components/SilencePanel';
+import ReflowPanel, { DEFAULT_REFLOW_FORM } from './components/ReflowPanel';
+import type { ReflowForm } from './components/ReflowPanel';
 import { applySilenceSnap, planSilenceSnap, resolveRange, parseSilenceParams } from './silence';
+import { applyReflow, parseMaxPerLine, planReflow } from './reflow';
 import './styles.css';
 
 interface History {
@@ -42,10 +45,15 @@ export default function App() {
   const [showMerge, setShowMerge] = useState(false);
   const [showDrift, setShowDrift] = useState(false);
   const [showSilence, setShowSilence] = useState(false);
+  const [showReflow, setShowReflow] = useState(false);
   // 漂移校准表单（锚点选择 + 目标时间输入），面板关闭后保留，重新导入字幕时重置
   const [driftForm, setDriftForm] = useState<DriftForm>(EMPTY_DRIFT_FORM);
   // 静音吸附表单（连续区间 + 阈值等参数），面板关闭后保留，重新导入字幕时重置
   const [silenceForm, setSilenceForm] = useState<SilenceForm>(DEFAULT_SILENCE_FORM);
+  // 断行重排表单（连续区间 + 每行最大字素数），面板关闭后保留，重新导入字幕时重置
+  const [reflowForm, setReflowForm] = useState<ReflowForm>(DEFAULT_REFLOW_FORM);
+  // 重排预览中被取消勾选的条目 id（可行项默认全选），随表单一并重置
+  const [reflowExcluded, setReflowExcluded] = useState<string[]>([]);
   // 修订稿独立于当前字幕保存：导入不会替换当前时间轴
   const [revision, setRevision] = useState<Subtitle[]>([]);
   const [revisionName, setRevisionName] = useState('');
@@ -117,6 +125,8 @@ export default function App() {
     setRevisionName('');
     setDriftForm(EMPTY_DRIFT_FORM);
     setSilenceForm(DEFAULT_SILENCE_FORM);
+    setReflowForm(DEFAULT_REFLOW_FORM);
+    setReflowExcluded([]);
   }, []);
 
   const importSrt = useCallback(
@@ -190,6 +200,28 @@ export default function App() {
       };
     });
   }, [silenceForm, waveform]);
+
+  // 应用断行重排：仅把勾选条目的重排文本写回当前字幕（id / 序号 / 时间保留），
+  // 不可行与未勾选的条目保持原样，整批作为一次撤销/重做操作
+  const applyReflowBatch = useCallback(() => {
+    setHistory((h) => {
+      const max = parseMaxPerLine(reflowForm.maxPerLine);
+      if (max === null) return h;
+      const targets = resolveRange(h.present, reflowForm.fromId, reflowForm.toId);
+      if (!targets) return h;
+      // 应用时基于 history.present 即时重算，与面板预览使用同一套规则
+      const plan = planReflow(targets, max);
+      const picked = plan.items.filter(
+        (it) => it.status === 'changed' && !reflowExcluded.includes(it.id)
+      );
+      if (picked.length === 0) return h;
+      return {
+        past: [...h.past, h.present],
+        present: applyReflow(h.present, picked),
+        future: [],
+      };
+    });
+  }, [reflowForm, reflowExcluded]);
 
   const importVideo = useCallback(    (file: File) => {
       setVideoUrl((old) => {
@@ -285,6 +317,7 @@ export default function App() {
         showMerge={showMerge}
         showDrift={showDrift}
         showSilence={showSilence}
+        showReflow={showReflow}
         canSilence={waveformReady}
         onImportSrt={importSrt}
         onImportVideo={importVideo}
@@ -301,18 +334,27 @@ export default function App() {
           setShowMerge((v) => !v);
           setShowDrift(false);
           setShowSilence(false);
+          setShowReflow(false);
         }}
         onToggleDrift={() => {
           setShowDrift((v) => !v);
           setShowMerge(false);
           setShowSilence(false);
+          setShowReflow(false);
         }}
         onToggleSilence={() => {
-          // 三个侧栏互斥；未就绪时按钮禁用，这里再兜底一次
+          // 四个侧栏互斥；未就绪时按钮禁用，这里再兜底一次
           if (!waveformReady) return;
           setShowSilence((v) => !v);
           setShowMerge(false);
           setShowDrift(false);
+          setShowReflow(false);
+        }}
+        onToggleReflow={() => {
+          setShowReflow((v) => !v);
+          setShowMerge(false);
+          setShowDrift(false);
+          setShowSilence(false);
         }}
       />
 
@@ -357,6 +399,18 @@ export default function App() {
               selectedId={selectedId}
               onJump={jumpTo}
               onApply={applySilence}
+            />
+          )}
+          {showReflow && (
+            <ReflowPanel
+              subs={subs}
+              form={reflowForm}
+              onFormChange={setReflowForm}
+              excluded={reflowExcluded}
+              onExcludedChange={setReflowExcluded}
+              selectedId={selectedId}
+              onJump={jumpTo}
+              onApply={applyReflowBatch}
             />
           )}
         </section>

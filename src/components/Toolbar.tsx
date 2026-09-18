@@ -13,6 +13,7 @@ interface ToolbarProps {
   showMerge: boolean;
   showDrift: boolean;
   showSilence: boolean;
+  showReflow: boolean;
   /** 音频波形是否就绪：静音吸附仅在波形就绪后可用 */
   canSilence: boolean;
   onImportSrt: (file: File) => void;
@@ -28,6 +29,7 @@ interface ToolbarProps {
   onToggleMerge: () => void;
   onToggleDrift: () => void;
   onToggleSilence: () => void;
+  onToggleReflow: () => void;
 }
 
 export default function Toolbar(props: ToolbarProps) {
@@ -116,6 +118,18 @@ export default function Toolbar(props: ToolbarProps) {
           }
         >
           🔇 静音吸附
+        </button>
+        <button
+          className={`btn ${props.showReflow ? 'primary' : ''}`}
+          disabled={!props.hasSubs}
+          onClick={props.onToggleReflow}
+          title={
+            props.hasSubs
+              ? '打开断行重排侧栏：按每行最大字素数把字幕重排为一行或两行'
+              : '请先导入当前字幕'
+          }
+        >
+          ✂️ 断行重排
         </button>
       </div>
 
